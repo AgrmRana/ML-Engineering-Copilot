@@ -34,10 +34,11 @@ export default function Assistant() {
   const sendMessageMutation = useMutation({
     mutationFn: (content: string) =>
       apiClient
-        .sendMessage(selectedConversation!, content, true)
+        .sendMessage(selectedConversation!, content, false)
         .then((res) => res.data),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['conversation', selectedConversation] })
+      setMessage('')
     },
   })
 
@@ -55,7 +56,6 @@ export default function Assistant() {
     e.preventDefault()
     if (message.trim() && selectedConversation) {
       sendMessageMutation.mutate(message)
-      setMessage('')
     }
   }
 
