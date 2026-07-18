@@ -42,26 +42,42 @@ class DocumentService:
             meta=metadata
         )
         
-        # Add chunks to vector store
-        chunk_ids = []
-        for i, chunk in enumerate(chunks):
-            chunk.metadata["document_id"] = document.id
-            chunk.metadata["project_id"] = project_id
-            chunk_ids.append(f"doc_{document.id}_chunk_{i}")
-        
-        self.vector_store.add_documents(chunks, ids=chunk_ids)
-        
-        # Update document with chunk count
-        self.document_repo.update(document.id, chunk_count=len(chunks), status="completed")
-        
-        return {
-            "id": document.id,
-            "filename": document.filename,
-            "file_type": document.file_type.value,
-            "file_size": document.file_size,
-            "chunk_count": len(chunks),
-            "status": "completed"
-        }
+        # Try to add chunks to vector store (requires OpenAI API key)
+        try:
+            chunk_ids = []
+            for i, chunk in enumerate(chunks):
+                chunk.metadata["document_id"] = document.id
+                chunk.metadata["project_id"] = project_id
+                chunk_ids.append(f"doc_{document.id}_chunk_{i}")
+            
+            self.vector_store.add_documents(chunks, ids=chunk_ids)
+            
+            # Update document with chunk count
+            self.document_repo.update(document.id, chunk_count=len(chunks), status="completed")
+            
+            return {
+                "id": document.id,
+                "project_id": document.project_id,
+                "filename": document.filename,
+                "file_type": document.file_type.value,
+                "file_size": document.file_size,
+                "chunk_count": len(chunks),
+                "status": "completed",
+                "created_at": document.created_at.isoformat()
+            }
+        except Exception as e:
+            # If vector store fails (e.g., no API key), still save document but without embeddings
+            self.document_repo.update(document.id, chunk_count=len(chunks), status="completed_no_embeddings")
+            return {
+                "id": document.id,
+                "project_id": document.project_id,
+                "filename": document.filename,
+                "file_type": document.file_type.value,
+                "file_size": document.file_size,
+                "chunk_count": len(chunks),
+                "status": "completed_no_embeddings",
+                "created_at": document.created_at.isoformat()
+            }
     
     def get_document(self, document_id: int) -> Optional[dict]:
         """Get document details."""

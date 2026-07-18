@@ -94,38 +94,47 @@ class ConversationService:
         conversation = self.conversation_repo.get(conversation_id)
         
         # Generate response
-        if use_rag and conversation.project_id:
-            # RAG-enabled response
-            retrieved_docs = self.retriever.retrieve(
-                query=content,
-                project_id=conversation.project_id,
-                min_score=settings.min_confidence_score
-            )
-            
-            llm_response = self.llm_client.generate_with_sources(
-                query=content,
-                retrieved_docs=retrieved_docs,
-                conversation_history=conversation_history
-            )
-            
+        try:
+            if use_rag and conversation.project_id:
+                # RAG-enabled response
+                retrieved_docs = self.retriever.retrieve(
+                    query=content,
+                    project_id=conversation.project_id,
+                    min_score=settings.min_confidence_score
+                )
+                
+                llm_response = self.llm_client.generate_with_sources(
+                    query=content,
+                    retrieved_docs=retrieved_docs,
+                    conversation_history=conversation_history
+                )
+                
+                assistant_message = self.message_repo.create(
+                    conversation_id=conversation_id,
+                    role="assistant",
+                    content=llm_response["response"],
+                    sources=llm_response["sources"],
+                    confidence=sum(doc.get("score", 0) for doc in retrieved_docs) / len(retrieved_docs) if retrieved_docs else 0.0
+                )
+            else:
+                # Direct LLM response without RAG
+                response = self.llm_client.generate_response(
+                    query=content,
+                    conversation_history=conversation_history
+                )
+                
+                assistant_message = self.message_repo.create(
+                    conversation_id=conversation_id,
+                    role="assistant",
+                    content=response
+                )
+        except Exception as e:
+            # If LLM fails (e.g., no API key), return a helpful error message
+            error_msg = "AI response failed. Please configure OPENAI_API_KEY in backend/.env to use AI features."
             assistant_message = self.message_repo.create(
                 conversation_id=conversation_id,
                 role="assistant",
-                content=llm_response["response"],
-                sources=llm_response["sources"],
-                confidence=sum(doc.get("score", 0) for doc in retrieved_docs) / len(retrieved_docs) if retrieved_docs else 0.0
-            )
-        else:
-            # Direct LLM response without RAG
-            response = self.llm_client.generate_response(
-                query=content,
-                conversation_history=conversation_history
-            )
-            
-            assistant_message = self.message_repo.create(
-                conversation_id=conversation_id,
-                role="assistant",
-                content=response
+                content=error_msg
             )
         
         return {

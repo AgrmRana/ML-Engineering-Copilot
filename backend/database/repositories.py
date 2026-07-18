@@ -8,11 +8,11 @@ class ProjectRepository:
     def __init__(self, db: Session):
         self.db = db
     
-    def create(self, name: str, description: Optional[str] = None, metadata: Optional[dict] = None) -> Project:
+    def create(self, name: str, description: Optional[str] = None, meta: Optional[dict] = None) -> Project:
         project = Project(
             name=name,
             description=description,
-            metadata=metadata or {}
+            meta=meta or {}
         )
         self.db.add(project)
         self.db.commit()
@@ -49,14 +49,14 @@ class DocumentRepository:
         self.db = db
     
     def create(self, project_id: int, filename: str, file_path: str, 
-               file_type: str, file_size: int, metadata: Optional[dict] = None) -> Document:
+               file_type: str, file_size: int, meta: Optional[dict] = None) -> Document:
         document = Document(
             project_id=project_id,
             filename=filename,
             file_path=file_path,
             file_type=file_type,
             file_size=file_size,
-            metadata=metadata or {}
+            meta=meta or {}
         )
         self.db.add(document)
         self.db.commit()
@@ -136,14 +136,14 @@ class MessageRepository:
     
     def create(self, conversation_id: int, role: str, content: str, 
                sources: Optional[list] = None, confidence: Optional[float] = None,
-               metadata: Optional[dict] = None) -> Message:
+               meta: Optional[dict] = None) -> Message:
         message = Message(
             conversation_id=conversation_id,
             role=role,
             content=content,
             sources=sources,
             confidence=confidence,
-            metadata=metadata or {}
+            meta=meta or {}
         )
         self.db.add(message)
         self.db.commit()
@@ -161,13 +161,13 @@ class ReportRepository:
         self.db = db
     
     def create(self, project_id: int, report_type: str, title: str, 
-               content: str, metadata: Optional[dict] = None) -> Report:
+               content: str, meta: Optional[dict] = None) -> Report:
         report = Report(
             project_id=project_id,
             report_type=report_type,
             title=title,
             content=content,
-            metadata=metadata or {}
+            meta=meta or {}
         )
         self.db.add(report)
         self.db.commit()
