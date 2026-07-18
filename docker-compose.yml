@@ -1,0 +1,17 @@
+version: '3.8'
+
+services:
+  postgres:
+    image: postgres:14
+    container_name: ml-workspace-db
+    environment:
+      POSTGRES_USER: mlworkspace
+      POSTGRES_PASSWORD: mlworkspace
+      POSTGRES_DB: ml_workspace_ai
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+volumes:
+  postgres_data:
