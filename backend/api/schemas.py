@@ -16,7 +16,7 @@ class ProjectResponse(BaseModel):
     created_at: str
     updated_at: Optional[str] = None
     document_count: Optional[int] = None
-    metadata: Optional[dict] = None
+    meta: Optional[dict] = None
 
 
 class DocumentResponse(BaseModel):

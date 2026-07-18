@@ -1,8 +1,7 @@
 from typing import List, Optional
 from sqlalchemy.orm import Session
 from database.repositories import ConversationRepository, MessageRepository
-from retrieval.hierarchical_retriever import HierarchicalRetriever
-from retrieval.vector_store import VectorStore
+from retrieval import HierarchicalRetriever, VectorStore
 from llm.llm_client import LLMClient
 from config.settings import settings
 

@@ -40,7 +40,7 @@ class Project(Base):
     status = Column(Enum(ProjectStatus), default=ProjectStatus.UPLOADING)
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
-    metadata = Column(JSON, nullable=True)
+    meta = Column(JSON, nullable=True)
     
     # Relationships
     documents = relationship("Document", back_populates="project", cascade="all, delete-orphan")
@@ -59,7 +59,7 @@ class Document(Base):
     file_size = Column(Integer, nullable=True)
     status = Column(String(50), default="pending")
     chunk_count = Column(Integer, default=0)
-    metadata = Column(JSON, nullable=True)
+    meta = Column(JSON, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     
@@ -75,7 +75,7 @@ class DocumentChunk(Base):
     document_id = Column(Integer, ForeignKey("documents.id"), nullable=False)
     chunk_index = Column(Integer, nullable=False)
     content = Column(Text, nullable=False)
-    metadata = Column(JSON, nullable=True)
+    meta = Column(JSON, nullable=True)
     embedding_id = Column(String(255), nullable=True, index=True)
     created_at = Column(DateTime, default=datetime.utcnow)
     
@@ -107,7 +107,7 @@ class Message(Base):
     content = Column(Text, nullable=False)
     sources = Column(JSON, nullable=True)  # Citations and sources
     confidence = Column(Float, nullable=True)
-    metadata = Column(JSON, nullable=True)
+    meta = Column(JSON, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
     
     # Relationships
@@ -122,7 +122,7 @@ class Report(Base):
     report_type = Column(String(100), nullable=False)  # 'validation', 'summary', 'review', etc.
     title = Column(String(255), nullable=False)
     content = Column(Text, nullable=False)
-    metadata = Column(JSON, nullable=True)
+    meta = Column(JSON, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
     
     # Relationships

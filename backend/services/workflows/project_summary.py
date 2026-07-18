@@ -1,6 +1,5 @@
 from typing import List, Dict, Any
-from retrieval.hierarchical_retriever import HierarchicalRetriever
-from retrieval.vector_store import VectorStore
+from retrieval import HierarchicalRetriever, VectorStore
 from llm.llm_client import LLMClient
 
 

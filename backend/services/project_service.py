@@ -2,8 +2,7 @@ from typing import List, Optional
 from sqlalchemy.orm import Session
 from database.repositories import ProjectRepository, DocumentRepository
 from processing.document_processor import DocumentProcessor
-from retrieval.vector_store import VectorStore
-from retrieval.hierarchical_retriever import HierarchicalRetriever
+from retrieval import VectorStore, HierarchicalRetriever
 from config.settings import settings
 
 
@@ -45,7 +44,7 @@ class ProjectService:
             "created_at": project.created_at.isoformat(),
             "updated_at": project.updated_at.isoformat(),
             "document_count": len(documents),
-            "metadata": project.metadata
+            "meta": project.meta
         }
     
     def list_projects(self, skip: int = 0, limit: int = 100) -> List[dict]:

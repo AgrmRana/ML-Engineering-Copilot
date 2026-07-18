@@ -2,8 +2,9 @@ from fastapi import FastAPI, Depends, HTTPException, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
 from typing import List
+from contextlib import asynccontextmanager
 
-from database.connection import get_db
+from database.connection import get_db, init_db
 from services import ProjectService, DocumentService, ConversationService
 from services.workflows import (
     ProjectSummaryWorkflow,
@@ -22,10 +23,22 @@ from api.schemas import (
 )
 from config.settings import settings
 
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Lifespan context manager for startup and shutdown events."""
+    # Initialize database on startup
+    init_db()
+    yield
+    # Cleanup on shutdown if needed
+    pass
+
+
 app = FastAPI(
     title="ML Workspace AI",
     description="Enterprise ML Engineering Copilot API",
-    version="1.0.0"
+    version="1.0.0",
+    lifespan=lifespan
 )
 
 # CORS middleware
@@ -152,6 +165,11 @@ def send_message(
     db: Session = Depends(get_db)
 ):
     """Send a message and get AI response."""
+    if message.use_rag and (not settings.openai_api_key or settings.openai_api_key == "your_openai_api_key_here"):
+        raise HTTPException(
+            status_code=503,
+            detail="OpenAI API key not configured. Please set OPENAI_API_KEY in backend/.env to use AI features."
+        )
     service = ConversationService(db)
     result = service.send_message(conversation_id, message.content, message.use_rag)
     return result
@@ -172,31 +190,47 @@ def search(search_request: SearchRequest, db: Session = Depends(get_db)):
     """Search documents using semantic search."""
     from retrieval import HierarchicalRetriever, VectorStore
     from config.settings import settings
+    import os
+    
+    # Check if OpenAI API key is configured
+    if not settings.openai_api_key or settings.openai_api_key == "your_openai_api_key_here":
+        raise HTTPException(
+            status_code=503,
+            detail="OpenAI API key not configured. Please set OPENAI_API_KEY in backend/.env to use search features."
+        )
     
     vector_store = VectorStore()
     retriever = HierarchicalRetriever(vector_store, search_request.top_k)
     
-    results = retriever.retrieve(
-        query=search_request.query,
-        project_id=search_request.project_id,
-        document_types=search_request.document_types,
-        min_score=settings.min_confidence_score
-    )
-    
-    return [
-        SearchResult(
-            content=r["content"],
-            metadata=r["metadata"],
-            score=r["score"]
+    try:
+        results = retriever.retrieve(
+            query=search_request.query,
+            project_id=search_request.project_id,
+            document_types=search_request.document_types,
+            min_score=settings.min_confidence_score
         )
-        for r in results
-    ]
+        
+        return [
+            SearchResult(
+                content=r["content"],
+                metadata=r["metadata"],
+                score=r["score"]
+            )
+            for r in results
+        ]
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Search failed: {str(e)}")
 
 
 # Workflow endpoints
 @app.post("/api/projects/{project_id}/workflows/summary")
 def generate_project_summary(project_id: int):
     """Generate a comprehensive project summary."""
+    if not settings.openai_api_key or settings.openai_api_key == "your_openai_api_key_here":
+        raise HTTPException(
+            status_code=503,
+            detail="OpenAI API key not configured. Please set OPENAI_API_KEY in backend/.env to use workflow features."
+        )
     workflow = ProjectSummaryWorkflow()
     result = workflow.generate_summary(project_id)
     return result
@@ -205,6 +239,11 @@ def generate_project_summary(project_id: int):
 @app.post("/api/projects/{project_id}/workflows/documentation/readme")
 def improve_readme(project_id: int):
     """Generate an improved README."""
+    if not settings.openai_api_key or settings.openai_api_key == "your_openai_api_key_here":
+        raise HTTPException(
+            status_code=503,
+            detail="OpenAI API key not configured. Please set OPENAI_API_KEY in backend/.env to use workflow features."
+        )
     workflow = DocumentationAssistantWorkflow()
     result = workflow.improve_readme(project_id)
     return result
@@ -213,6 +252,11 @@ def improve_readme(project_id: int):
 @app.post("/api/projects/{project_id}/workflows/documentation/architecture")
 def generate_architecture_doc(project_id: int):
     """Generate architecture documentation."""
+    if not settings.openai_api_key or settings.openai_api_key == "your_openai_api_key_here":
+        raise HTTPException(
+            status_code=503,
+            detail="OpenAI API key not configured. Please set OPENAI_API_KEY in backend/.env to use workflow features."
+        )
     workflow = DocumentationAssistantWorkflow()
     result = workflow.generate_architecture_doc(project_id)
     return result
@@ -221,6 +265,11 @@ def generate_architecture_doc(project_id: int):
 @app.post("/api/projects/{project_id}/workflows/documentation/model-card")
 def generate_model_card(project_id: int):
     """Generate a model card."""
+    if not settings.openai_api_key or settings.openai_api_key == "your_openai_api_key_here":
+        raise HTTPException(
+            status_code=503,
+            detail="OpenAI API key not configured. Please set OPENAI_API_KEY in backend/.env to use workflow features."
+        )
     workflow = DocumentationAssistantWorkflow()
     result = workflow.generate_model_card(project_id)
     return result
@@ -229,6 +278,11 @@ def generate_model_card(project_id: int):
 @app.post("/api/projects/{project_id}/workflows/validation/report")
 def generate_validation_report(project_id: int):
     """Generate a model validation report."""
+    if not settings.openai_api_key or settings.openai_api_key == "your_openai_api_key_here":
+        raise HTTPException(
+            status_code=503,
+            detail="OpenAI API key not configured. Please set OPENAI_API_KEY in backend/.env to use workflow features."
+        )
     workflow = ModelValidationWorkflow()
     result = workflow.generate_validation_report(project_id)
     return result
@@ -237,6 +291,11 @@ def generate_validation_report(project_id: int):
 @app.post("/api/projects/{project_id}/workflows/validation/risks")
 def identify_risks(project_id: int):
     """Identify model risks."""
+    if not settings.openai_api_key or settings.openai_api_key == "your_openai_api_key_here":
+        raise HTTPException(
+            status_code=503,
+            detail="OpenAI API key not configured. Please set OPENAI_API_KEY in backend/.env to use workflow features."
+        )
     workflow = ModelValidationWorkflow()
     result = workflow.identify_risks(project_id)
     return result
@@ -245,6 +304,11 @@ def identify_risks(project_id: int):
 @app.post("/api/projects/{project_id}/workflows/explainability/shap")
 def explain_shap(project_id: int):
     """Explain SHAP analysis."""
+    if not settings.openai_api_key or settings.openai_api_key == "your_openai_api_key_here":
+        raise HTTPException(
+            status_code=503,
+            detail="OpenAI API key not configured. Please set OPENAI_API_KEY in backend/.env to use workflow features."
+        )
     workflow = ExplainabilityWorkflow()
     result = workflow.explain_shap(project_id)
     return result
@@ -253,6 +317,11 @@ def explain_shap(project_id: int):
 @app.post("/api/projects/{project_id}/workflows/explainability/feature-importance")
 def explain_feature_importance(project_id: int):
     """Explain feature importance."""
+    if not settings.openai_api_key or settings.openai_api_key == "your_openai_api_key_here":
+        raise HTTPException(
+            status_code=503,
+            detail="OpenAI API key not configured. Please set OPENAI_API_KEY in backend/.env to use workflow features."
+        )
     workflow = ExplainabilityWorkflow()
     result = workflow.explain_feature_importance(project_id)
     return result
@@ -261,6 +330,11 @@ def explain_feature_importance(project_id: int):
 @app.post("/api/projects/{project_id}/workflows/explainability/metrics")
 def explain_evaluation_metrics(project_id: int):
     """Explain evaluation metrics."""
+    if not settings.openai_api_key or settings.openai_api_key == "your_openai_api_key_here":
+        raise HTTPException(
+            status_code=503,
+            detail="OpenAI API key not configured. Please set OPENAI_API_KEY in backend/.env to use workflow features."
+        )
     workflow = ExplainabilityWorkflow()
     result = workflow.explain_evaluation_metrics(project_id)
     return result
@@ -269,6 +343,11 @@ def explain_evaluation_metrics(project_id: int):
 @app.post("/api/projects/{project_id}/workflows/review/code")
 def review_code_quality(project_id: int):
     """Review code quality."""
+    if not settings.openai_api_key or settings.openai_api_key == "your_openai_api_key_here":
+        raise HTTPException(
+            status_code=503,
+            detail="OpenAI API key not configured. Please set OPENAI_API_KEY in backend/.env to use workflow features."
+        )
     workflow = RepositoryReviewWorkflow()
     result = workflow.review_code_quality(project_id)
     return result
@@ -277,6 +356,11 @@ def review_code_quality(project_id: int):
 @app.post("/api/projects/{project_id}/workflows/review/engineering")
 def review_engineering_practices(project_id: int):
     """Review engineering practices."""
+    if not settings.openai_api_key or settings.openai_api_key == "your_openai_api_key_here":
+        raise HTTPException(
+            status_code=503,
+            detail="OpenAI API key not configured. Please set OPENAI_API_KEY in backend/.env to use workflow features."
+        )
     workflow = RepositoryReviewWorkflow()
     result = workflow.review_engineering_practices(project_id)
     return result
@@ -285,6 +369,11 @@ def review_engineering_practices(project_id: int):
 @app.post("/api/projects/{project_id}/workflows/interview/questions")
 def generate_interview_questions(project_id: int, role: str = "Data Scientist"):
     """Generate interview questions."""
+    if not settings.openai_api_key or settings.openai_api_key == "your_openai_api_key_here":
+        raise HTTPException(
+            status_code=503,
+            detail="OpenAI API key not configured. Please set OPENAI_API_KEY in backend/.env to use workflow features."
+        )
     workflow = InterviewAssistantWorkflow()
     result = workflow.generate_interview_questions(project_id, role)
     return result

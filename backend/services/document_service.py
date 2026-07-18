@@ -5,7 +5,7 @@ import shutil
 from pathlib import Path
 from database.repositories import DocumentRepository
 from processing.document_processor import DocumentProcessor
-from retrieval.vector_store import VectorStore
+from retrieval import VectorStore
 from config.settings import settings
 
 
@@ -39,7 +39,7 @@ class DocumentService:
             file_path=str(file_path),
             file_type=metadata["file_type"],
             file_size=metadata["file_size"],
-            metadata=metadata
+            meta=metadata
         )
         
         # Add chunks to vector store
