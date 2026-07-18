@@ -132,12 +132,15 @@ export default function Upload() {
               </div>
             )}
 
-            {uploadStatus === 'idle' && selectedFiles && selectedProject && (
+            {selectedFiles && selectedFiles.length > 0 && selectedProject && uploadStatus !== 'uploading' && (
               <button
                 onClick={handleUpload}
                 className="btn btn-primary w-full"
+                disabled={uploadStatus === 'success' || uploadStatus === 'error'}
               >
-                Upload Documents
+                {uploadStatus === 'success' ? 'Upload Complete' : 
+                 uploadStatus === 'error' ? 'Upload Failed - Try Again' :
+                 'Upload Documents'}
               </button>
             )}
 
