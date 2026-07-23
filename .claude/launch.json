@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "streamlit-app",
+      "runtimeExecutable": "/Users/agrimrana/Desktop/Job Projects/RAG LLM/.venv/bin/python",
+      "runtimeArgs": ["-m", "streamlit", "run", "/Users/agrimrana/Desktop/Job Projects/RAG LLM/app/main.py", "--server.headless", "true"],
+      "port": 8501
+    }
+  ]
+}

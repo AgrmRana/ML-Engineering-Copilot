@@ -20,22 +20,18 @@ wheels/
 .installed.cfg
 *.egg
 venv/
+.venv/
 env/
 ENV/
-
-# Database
-*.db
-*.sqlite
-*.sqlite3
+.pytest_cache/
 
 # Environment variables
 .env
 .env.local
 
-# Data
-data/
-uploads/
-chroma/
+# Data (transient scratch space only -- nothing here is meant to persist)
+data/*
+!data/.gitkeep
 
 # IDE
 .vscode/
@@ -43,21 +39,6 @@ chroma/
 *.swp
 *.swo
 *~
-
-# Node
-node_modules/
-npm-debug.log*
-yarn-debug.log*
-yarn-error.log*
-.pnpm-debug.log*
-
-# Build
-dist/
-build/
-
-# Logs
-*.log
-logs/
 
 # OS
 .DS_Store
