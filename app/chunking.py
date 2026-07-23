@@ -24,8 +24,8 @@ from dataclasses import dataclass
 from document_loader import RawDocument
 from utils import count_tokens, decode_tokens, encode_tokens
 
-CHUNK_TOKENS = 400
-CHUNK_OVERLAP_TOKENS = 60
+CHUNK_TOKENS = 200  # comfortably under the embedding model's 256-token max_seq_length
+CHUNK_OVERLAP_TOKENS = 30
 
 _HEADER_RE = re.compile(r"^#{1,6}\s+.*$", re.MULTILINE)
 

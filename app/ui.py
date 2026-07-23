@@ -1,12 +1,11 @@
 """All Streamlit UI: sidebar upload/session controls, Chat/Search/Assistants tabs."""
-import os
-
 import streamlit as st
 
 import chunking
 import document_loader
 import session
 import workflows
+from llm import check_ollama_status
 from rag import answer_question
 from retrieval import retrieve
 from utils import count_tokens
@@ -37,10 +36,11 @@ def _render_sidebar() -> None:
     with st.sidebar:
         st.header("Project")
 
-        if not os.getenv("OPENAI_API_KEY"):
-            st.error("OPENAI_API_KEY is not set. Add it to a .env file (see .env.example).")
+        ollama_ready, ollama_message = check_ollama_status()
+        if not ollama_ready:
+            st.error(ollama_message)
         else:
-            st.success("OpenAI API key detected.")
+            st.success(ollama_message)
 
         uploaded = st.file_uploader(
             "Upload files or a .zip of a repository",

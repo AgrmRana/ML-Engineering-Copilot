@@ -1,43 +1,38 @@
-"""Batched OpenAI embedding calls.
+"""Local embedding using Sentence Transformers.
 
-Defaults to text-embedding-3-small: cheaper and faster than -large, and
-plenty of quality for a local single-session assistant -- there's no
-production-scale recall requirement here that would justify the larger
-model's cost.
+No API calls, no cost. The all-MiniLM-L6-v2 model (22MB) runs entirely on
+your machine and provides good semantic embeddings for retrieval.
+
+Downloaded on first use and cached locally (~100MB disk space total).
 """
-import os
-
 import numpy as np
-from openai import OpenAI
+from sentence_transformers import SentenceTransformer
 
-_EMBEDDING_MODEL = os.getenv("OPENAI_EMBEDDING_MODEL", "text-embedding-3-small")
-_BATCH_SIZE = 100
-
-_client: OpenAI | None = None
+_MODEL_NAME = "all-MiniLM-L6-v2"
+_model: SentenceTransformer | None = None
 
 
-def _get_client() -> OpenAI:
-    global _client
-    if _client is None:
-        _client = OpenAI()
-    return _client
+def _get_model() -> SentenceTransformer:
+    global _model
+    if _model is None:
+        _model = SentenceTransformer(_MODEL_NAME)
+    return _model
 
 
 def embed_texts(texts: list[str]) -> np.ndarray:
-    """Embed a list of texts, returning an (n, d) L2-normalized float32 matrix.
+    """Embed a list of texts locally, returning an (n, d) L2-normalized float32 matrix.
 
     Normalizing lets a plain inner product double as cosine similarity, which
     is what the FAISS IndexFlatIP in vector_store.py relies on.
+
+    First call downloads the model (~22MB) from HuggingFace; subsequent calls
+    use the cached copy. No internet required after first download.
     """
     if not texts:
         return np.zeros((0, 0), dtype="float32")
 
-    client = _get_client()
-    vectors: list[list[float]] = []
-    for i in range(0, len(texts), _BATCH_SIZE):
-        batch = texts[i:i + _BATCH_SIZE]
-        response = client.embeddings.create(model=_EMBEDDING_MODEL, input=batch)
-        vectors.extend(item.embedding for item in response.data)
+    model = _get_model()
+    vectors = model.encode(texts, convert_to_numpy=True, show_progress_bar=False)
 
     matrix = np.array(vectors, dtype="float32")
     norms = np.linalg.norm(matrix, axis=1, keepdims=True)

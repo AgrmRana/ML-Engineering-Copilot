@@ -33,8 +33,8 @@ and correctly as possible, with just enough surrounding application to make that
         ▼                       ▼                       ▼
 ┌───────────────┐      ┌─────────────────┐      ┌────────────────┐
 │ document_loader│ -->  │   chunking      │ -->  │  embeddings    │
-│ (extract text)  │      │ (token-aware,   │      │ (OpenAI, batched│
-│                 │      │  AST/cell-aware)│      │  + normalized)  │
+│ (extract text)  │      │ (token-aware,   │      │ (local Sentence │
+│                 │      │  AST/cell-aware)│      │  Transformers)  │
 └───────────────┘      └─────────────────┘      └────────┬───────┘
                                                             ▼
                                                    ┌─────────────────┐
@@ -58,7 +58,8 @@ and correctly as possible, with just enough surrounding application to make that
                                                           ▼
                                                     ┌──────────┐
                                                     │  llm.py  │
-                                                    │ (OpenAI) │
+                                                    │ (Ollama, │
+                                                    │  local)  │
                                                     └──────────┘
 ```
 
@@ -74,10 +75,10 @@ app/
     ui.py               # Sidebar (upload/session) + Chat/Search/Assistants tabs
     document_loader.py  # File-type detection, per-type text extraction, zip/folder walking
     chunking.py         # Token-aware chunking (text, markdown, AST-based python, notebook cells)
-    embeddings.py       # Batched OpenAI embedding calls, L2-normalized
+    embeddings.py       # Local Sentence Transformers embeddings, L2-normalized
     vector_store.py     # FAISS IndexFlatIP wrapper (in-memory cosine similarity)
     retrieval.py        # Over-fetch + MMR diversification + token-budget context assembly
-    llm.py               # Thin OpenAI chat-completion wrapper
+    llm.py               # Thin wrapper around a local Ollama chat model
     prompts.py            # RAG system prompt + one prompt per assistant workflow
     rag.py                 # Grounded chat: retrieve -> build context -> one LLM call
     workflows.py            # Data-driven assistant workflows (12 of them, one runner)
@@ -126,11 +127,18 @@ dropping it keeps the dependency list smaller (see [Limitations](#limitations) f
 
 ### 2. Chunking strategy — the part most RAG demos get wrong
 
-Chunk size and overlap are measured in **tokens**, against the embedding model's own tokenizer
-(`tiktoken`), not raw character counts. The original version of this project chunked at "1000
-characters, 200 character overlap" — arbitrary numbers with no defined relationship to what the model
-actually processes. This version uses **~400 tokens per chunk with ~60 tokens (~15%) of overlap**, sized
-directly against token counts.
+Chunk size and overlap are measured in **tokens**, against the *actual* embedding model's tokenizer
+(`all-MiniLM-L6-v2`'s WordPiece tokenizer, loaded via `transformers.AutoTokenizer` — already a dependency
+of `sentence-transformers`, so this adds nothing new), not raw character counts and not a stand-in
+tokenizer from a different model family. `all-MiniLM-L6-v2` truncates its input at **256 tokens**
+(`model.max_seq_length`); an earlier version of this project counted tokens with OpenAI's `tiktoken`
+(cl100k_base) — a leftover from when embeddings were generated via the OpenAI API — while chunking to
+~400 of those tokens per chunk. Because tiktoken and the MiniLM tokenizer segment text differently, a
+"400-token" chunk by that count was often 380-420 *real* WordPiece tokens once it reached the embedding
+model, well past the 256-token limit — the model silently truncated the excess, so the embedding
+represented only part of the chunk while the full (untruncated) text still went into the LLM's context.
+This version chunks at **~200 tokens per chunk with ~30 tokens (~15%) of overlap**, counted with the same
+tokenizer that will embed the text, so nothing is silently dropped.
 
 Three chunking strategies, chosen per file type:
 
@@ -153,11 +161,13 @@ later powers citations that point at a specific chunk instance, not just a bare 
 
 ### 3. Embeddings
 
-`embeddings.py` batches texts into groups of 100 per API call (rather than one call per chunk) and
-defaults to **`text-embedding-3-small`**. The larger `-large` model is not needed here: this is a
-single-session, moderate-corpus-size assistant, not a system optimizing for recall at scale, so the
-cheaper/faster model is the better trade-off. Every embedding is L2-normalized on the way out, which is
-what makes a plain inner product equivalent to cosine similarity downstream.
+`embeddings.py` uses a local **Sentence Transformers** model (`all-MiniLM-L6-v2`, ~22MB, 384 dimensions)
+via the `sentence-transformers` library — everything runs on your machine, with no API key, no network
+call, and no per-token cost. The model is downloaded once from HuggingFace on first use and cached
+locally afterward. `all-MiniLM-L6-v2` is a standard, well-benchmarked choice for semantic similarity: fast
+on CPU, small on disk, and good enough for a single-session assistant's retrieval needs — this is not a
+system trying to optimize recall at billion-document scale. Every embedding is L2-normalized on the way
+out, which is what makes a plain inner product equivalent to cosine similarity downstream.
 
 ### 4. Vector store
 
@@ -197,9 +207,23 @@ way to handle it than an arbitrary number.
 
 ### 6. Prompting and generation
 
-`llm.py` is a single, direct wrapper around `openai.OpenAI().chat.completions.create` — there is no
-LangChain in this project. A framework buys very little here and hides exactly what's being sent to the
-model, which matters when the whole point is to demonstrate the mechanics clearly.
+`llm.py` is a single, direct wrapper around a local **Ollama** server's chat API (`POST
+/api/chat`) — there is no LangChain, no hosted API, and no cost. Ollama runs an open-source model (this
+project defaults to **Mistral 7B**, configurable via `OLLAMA_MODEL`) entirely on your machine. A framework
+buys very little here and hides exactly what's being sent to the model, which matters when the whole
+point is to demonstrate the mechanics clearly.
+
+Every request explicitly sets **`num_ctx=12288`** (configurable via `OLLAMA_NUM_CTX`). Ollama defaults new
+sessions to a much smaller context window (historically 2048 tokens) regardless of what the underlying
+model actually supports, and this pipeline can assemble up to 6000 tokens of retrieved context plus 2000
+tokens of chat history — without raising `num_ctx`, Ollama would silently truncate the prompt itself
+before the model ever saw most of what was retrieved, independent of anything `retrieval.py` does
+correctly. 12288 leaves headroom for prompt overhead and a long generated answer (the assistant workflows
+in particular can produce lengthy structured documents) and comfortably fits every model in the
+recommended list above. `chat()` also treats *any* request failure — Ollama not running, the configured
+model not pulled (a 404), a timeout — as a recoverable condition and returns a plain-language message
+instead of raising, so a misconfigured local model degrades to a clear in-chat error rather than crashing
+the whole Streamlit app.
 
 Every prompt in `prompts.py` shares the same grounding rules: answer only from the numbered context
 sources, cite the source number for every claim (`[2]`), and explicitly say so when the context doesn't
@@ -230,7 +254,8 @@ build context → one LLM call" with a different prompt, which is now one datacl
 
 ## Installation and setup
 
-**Prerequisites:** Python 3.10+, an OpenAI API key.
+**Prerequisites:** Python 3.10+, [Ollama](https://ollama.ai) installed locally. No API key, no account,
+no cost.
 
 ```bash
 git clone <repository-url>
@@ -238,16 +263,24 @@ cd RAG-LLM
 python -m venv .venv
 source .venv/bin/activate      # Windows: .venv\Scripts\activate
 pip install -r requirements.txt
-cp .env.example .env           # then edit .env and set OPENAI_API_KEY
+cp .env.example .env           # optional -- only needed to override defaults
+
+# Pull a local chat model (one-time, ~4GB download)
+ollama pull mistral
 ```
+
+`sentence-transformers` downloads its embedding model (~22MB) automatically on first use; no separate
+step is needed for that one.
 
 ## Running it
 
 ```bash
-streamlit run app/main.py
+ollama serve                   # in one terminal, if not already running
+streamlit run app/main.py      # in another terminal
 ```
 
-This opens the app at `http://localhost:8501`. The sidebar shows whether `OPENAI_API_KEY` was detected.
+This opens the app at `http://localhost:8501`. The sidebar shows whether Ollama is reachable and the
+configured model is pulled.
 
 ### Uploading a project
 
@@ -276,6 +309,11 @@ to answer.
 
 ## Limitations
 
+- **Local model quality/speed trade-off.** Mistral 7B (via Ollama) and `all-MiniLM-L6-v2` (via Sentence
+  Transformers) are free and run entirely offline, but are smaller and slower than hosted models like
+  GPT-4 — expect noticeably slower responses (especially without a GPU) and occasionally less polished
+  answers. Swap `OLLAMA_MODEL` for a larger local model (e.g. `llama3`) for better quality at the cost of
+  more RAM/disk and slower inference.
 - **Session-only, single-user.** There is no persistence, no accounts, and no way to resume a previous
   session — this mirrors a local desktop app, not a deployable multi-user service.
 - **English-oriented chunking heuristics.** The markdown header regex and sentence/paragraph splitting
@@ -292,15 +330,17 @@ to answer.
 
 ## Troubleshooting
 
-- **"OPENAI_API_KEY is not set"** — copy `.env.example` to `.env` and fill in a real key, or export
-  `OPENAI_API_KEY` in your shell before running `streamlit run app/main.py`.
+- **"Ollama not reachable"** — make sure Ollama is installed and running: `ollama serve` in a terminal
+  (it may already be running as a background service after installation on macOS/Windows).
+- **"Model not found"** — run `ollama pull mistral` (or whichever model you set via `OLLAMA_MODEL`).
 - **`faiss` fails to install** — `faiss-cpu` ships prebuilt wheels for common platforms (Linux, macOS,
   Windows on standard Python versions); if your platform lacks a wheel, installing via `conda install -c
   pytorch faiss-cpu` is the usual fallback.
-- **Large repository takes a while to process** — ingestion cost scales with the number of chunks (each
-  batch of ~100 chunks is one embedding API call); a very large repo will take longer and cost more to
-  embed. The 20MB per-file cap and directory ignore-list (`venv/`, `node_modules/`, etc.) exist specifically
-  to keep this bounded.
+- **First run is slow** — the embedding model downloads (~22MB) on first use, and Ollama loads the chat
+  model into memory on its first request; both are one-time costs per machine/session.
+- **Large repository takes a while to process** — local inference is slower than a hosted API,
+  especially without a GPU. The 20MB per-file cap and directory ignore-list (`venv/`, `node_modules/`,
+  etc.) exist specifically to keep this bounded.
 - **A file didn't get indexed** — check the "Skipped files" expander in the sidebar; it lists every
   skipped file with a reason (unsupported type, too large, empty, or a parse failure).
 
