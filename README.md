@@ -1,25 +1,418 @@
 # ML Project Assistant
 
-A local, single-session RAG assistant for exploring machine learning projects and repositories — upload a
-project, it gets chunked, embedded, and indexed in memory, and you can ask grounded questions about it,
-search it semantically, or run a handful of specialized "assistant" workflows (summaries, documentation
-generation, validation review, interview questions) over it. Think **NotebookLM for ML repos**, running
-entirely on your machine, for the length of one session.
+**A local, single-session RAG assistant for exploring machine learning projects and repositories.**
 
-## Motivation and business problem
+Upload a project, it gets chunked, embedded, and indexed in memory, and you can ask grounded questions about it, search it semantically, or run specialized workflows (summaries, documentation generation, validation review, interview questions). Think **NotebookLM for ML repos**, running entirely on your machine, for the length of one session.
 
-ML projects accumulate a lot of scattered documentation: a README, some notebooks, training scripts, a
-CSV or two, maybe a PDF design doc. Understanding an unfamiliar ML codebase — your own from six months
-ago, a teammate's, or a candidate's take-home — usually means reading all of that by hand. This project
-demonstrates how far a fairly small, carefully-built RAG pipeline can go toward automating that first
-pass: retrieval-augmented question answering grounded in the actual project contents, plus a few
-higher-level workflows (project summary, README generation, validation review, mock interview questions)
-built on the same retrieval primitive.
+---
 
-This is deliberately **not** an attempt at a production document-management platform. There's no
-database, no auth, no multi-user support, no persistent history. It's built to showcase the AI
-engineering — chunking, embeddings, vector search, retrieval, prompting, LLM orchestration — as clearly
-and correctly as possible, with just enough surrounding application to make that usable and demoable.
+## Quick Start (60 seconds)
+
+```bash
+# 1. Clone and install (first time only)
+git clone https://github.com/AgrmRana/ML-Engineering-Copilot.git
+cd RAG-LLM
+python -m venv .venv
+source .venv/bin/activate      # Windows: .venv\Scripts\activate
+pip install -r requirements.txt
+ollama pull mistral             # Download local LLM (~4GB, one-time)
+
+# 2. Run (any time)
+ollama serve                    # Terminal 1: Start Ollama
+streamlit run app/main.py       # Terminal 2: Start the UI
+# Opens at http://localhost:8501
+```
+
+**No API keys. No cloud. No cost. Everything runs locally.**
+
+---
+
+## What It Does: Three Ways to Explore
+
+### 1. **Chat Tab** — Grounded Question Answering
+
+**Experience:** Ask a natural question about the project. The system retrieves the most relevant code/docs and answers based *only* on what it found, with citations.
+
+**Example workflow:**
+```
+You: "What does the training loop do?"
+↓
+System: Retrieves functions/cells related to training
+↓
+LLM: "The training loop (defined in train.py, lines 45-67) iterates
+     over batches, computes loss using categorical cross-entropy [1],
+     updates weights via Adam optimizer [2], and logs metrics every
+     100 steps [3]."
+     
+[Sources shown below: exact file, chunk index, relevance score]
+```
+
+**Key features:**
+- One retrieval call + one LLM call (efficient, predictable)
+- Chat history is kept (within token budget)
+- Every claim is cited to the actual source
+- If context doesn't cover the question, the system says so explicitly
+
+### 2. **Search Tab** — Raw Semantic Search
+
+**Experience:** Find chunks related to a topic without involving the LLM. See exactly what the retriever considers relevant.
+
+**Example:**
+```
+Query: "data preprocessing validation split"
+↓
+Results:
+  1. preprocessing.py (chunk 2/5) — score 0.85
+     "train_test_split(X, y, test_size=0.2...)"
+  2. config.yaml (chunk 1/3) — score 0.72
+     "validation_split: 0.2"
+  3. README.md (chunk 3/7) — score 0.68
+     "Data is split 80/20 for training and validation"
+```
+
+**Why this matters:** See the retriever working *independently* from the LLM. Useful for understanding what context *would* be retrieved for a query before the model answers.
+
+### 3. **Assistants Tab** — Specialized Workflows
+
+**12 pre-built assistants** for common tasks, each using the same retrieval pipeline but with different prompts:
+
+| Workflow | What It Generates |
+|----------|-------------------|
+| **Project Summary** | Architecture, components, tech stack, data pipeline |
+| **Generate README** | Installation, usage, project structure, contributing |
+| **Architecture Doc** | System overview, components, data flow, design patterns |
+| **Model Card** | Model details, intended use, training data, performance, limitations |
+| **Validation Report** | Assumptions, risks, data leakage, overfitting concerns |
+| **Risk Analysis** | Bias/fairness/compliance/security risks with mitigations |
+| **Explain SHAP** | SHAP analysis interpretation and feature importance |
+| **Explain Feature Importance** | Feature ranking, methodology, recommendations |
+| **Explain Metrics** | Evaluation metrics, trade-offs, business relevance |
+| **Code Quality Review** | Code organization, naming, complexity, best practices |
+| **Engineering Review** | Testing, CI/CD, version control, security practices |
+| **Interview Questions** | 5–8 tailored technical questions (parameterized by role) |
+
+Example: Click "Interview Questions", set role to "Senior ML Engineer", get a list of questions the interviewer could ask about the uploaded project.
+
+---
+
+## Visual Walkthrough: How the App Works
+
+### Initial State — Ready for Upload
+
+```
+┌─────────────────────────────────────────────────────┐
+│ ML Project Assistant                                │
+│ Upload a machine learning project or repository...  │
+├──────────────────────────────────────────────────────┤
+│                                                      │
+│  ✓ Ollama ready (mistral)          | Chat / Search │
+│                                    | Assistants    │
+│  📁 Upload files or a .zip                          │
+│    ├── Drag and drop or Browse                      │
+│    └── Limit 200MB per file                         │
+│                                                      │
+│  📊 Indexed chunks: 0                               │
+│                                                      │
+│  [Process files]     [Clear session]                │
+└──────────────────────────────────────────────────────┘
+```
+
+**What you see:**
+- **Sidebar (left):** Ollama status indicator (green = ready), file upload widget, indexed chunk counter
+- **Main (right):** Tab selector (Chat/Search/Assistants), empty state waiting for files
+- **Status indicator:** Shows Ollama is running + model is pulled (critical for functionality)
+
+---
+
+### After Upload — Files Indexed
+
+Once you drag-and-drop a project `.zip` or select files:
+
+```
+┌─────────────────────────────────────────────────────┐
+│ ML Project Assistant                                │
+├──────────────────────────────────────────────────────┤
+│                                                      │
+│  ✓ Ollama ready (mistral)          | Chat / Search │
+│                                    | Assistants    │
+│  📁 Uploaded: credit_risk_dataset  │                │
+│                                    │ Ask a question │
+│  📊 Indexed chunks: 18             │ about the      │
+│                                    │ uploaded...    │
+│  Indexed files:                    │                │
+│  • train.py — 8 chunks, 1.2K tokens                │
+│  • eval.py — 6 chunks, 945 tokens                  │
+│  • README.md — 4 chunks, 623 tokens                │
+│                                                      │
+│  [Process more files]                              │
+└──────────────────────────────────────────────────────┘
+```
+
+**What changed:**
+- **Chunk counter:** Updated to show how many semantic chunks were created
+- **File breakdown:** Each file shows its chunk count and token count (helps you see what got indexed)
+- **Ready for queries:** You can now ask questions or run searches
+
+---
+
+### Tab 1: Chat — Ask Grounded Questions
+
+```
+┌─────────────────────────────────────────────────────┐
+│ ML Project Assistant                                │
+├──────────────────────────────────────────────────────┤
+│                                                      │
+│ Chat / Search / Assistants                          │
+│                                                      │
+│ 👤 You: "How is the model evaluated?"              │
+│                                                      │
+│ 🤖 Assistant:                                       │
+│    The model is evaluated using:                    │
+│    - Accuracy [1] on the test set                  │
+│    - F1 score [1] weighted by class                │
+│    - ROC-AUC [2] for probability ranking           │
+│                                                      │
+│    ▼ Sources (click to expand)                     │
+│      [1] eval.py (chunk 2/3, score 0.89)          │
+│      [2] metrics.py (chunk 1/2, score 0.85)       │
+│                                                      │
+│ 💬 Ask a question about the project...             │
+└─────────────────────────────────────────────────────┘
+```
+
+**Key features visible:**
+- **Chat history:** Shows your question + assistant's answer
+- **Citations:** Every claim is numbered and traceable [1], [2], etc.
+- **Source panel:** Click to see which file/chunk gave that answer
+- **Input box:** Ready for your next question
+- **Confidence score:** Shows how confident the retriever was (0.85 = very confident)
+
+---
+
+### Tab 2: Search — Semantic Search (No LLM)
+
+```
+┌─────────────────────────────────────────────────────┐
+│ ML Project Assistant                                │
+├──────────────────────────────────────────────────────┤
+│                                                      │
+│ Chat / Search / Assistants                          │
+│                                                      │
+│ Raw semantic search over indexed chunks, ranked    │
+│ by cosine similarity -- no LLM call.               │
+│                                                      │
+│ Search query: [preprocessing validation]           │
+│ Results: [●●●●●●●●────────] 8                     │
+│                                                      │
+│ ┌─────────────────────────────────────┐            │
+│ │ train.py (chunk 2/5) — score 0.87   │            │
+│ │ train_test_split(X, y, test_size...)│            │
+│ └─────────────────────────────────────┘            │
+│                                                      │
+│ ┌─────────────────────────────────────┐            │
+│ │ config.yaml (chunk 1/2) — score 0.73│            │
+│ │ validation_split: 0.2                │            │
+│ └─────────────────────────────────────┘            │
+│                                                      │
+│ ┌─────────────────────────────────────┐            │
+│ │ README.md (chunk 3/4) — score 0.69  │            │
+│ │ Data is split 80/20 train/val...    │            │
+│ └─────────────────────────────────────┘            │
+└─────────────────────────────────────────────────────┘
+```
+
+**Key features visible:**
+- **No LLM involvement:** Just retrieve + rank semantically, instant results
+- **Relevance scores:** See exactly how similar each chunk is to your query (0.87 = very similar)
+- **Previews:** First 100 characters of each chunk visible
+- **Slider control:** Adjust number of results (1–20)
+
+**Why this is powerful:** You see the *raw* retrieval independently from generation. Debug retrieval quality without waiting for LLM.
+
+---
+
+### Tab 3: Assistants — Specialized Workflows
+
+```
+┌─────────────────────────────────────────────────────┐
+│ ML Project Assistant                                │
+├──────────────────────────────────────────────────────┤
+│                                                      │
+│ Chat / Search / Assistants                          │
+│                                                      │
+│ Grounded assistants built on the same retrieval    │
+│ pipeline as Chat.                                   │
+│                                                      │
+│ Choose an assistant:                               │
+│ ┌───────────────────────────────────┐             │
+│ │ Project Summary                   │ ▼            │
+│ └───────────────────────────────────┘             │
+│                                                    │
+│ [Or choose: Generate README, Architecture Doc,   │
+│  Model Card, Validation Report, Risk Analysis,   │
+│  Code Quality Review, Interview Questions, ...]   │
+│                                                    │
+│ Target role (for Interview Questions):            │
+│ [Data Scientist____________________]              │
+│                                                    │
+│                    [Run]                          │
+│                                                    │
+│ ⏳ Running Project Summary...                     │
+│                                                    │
+│ 🤖 Output:                                        │
+│    PROJECT OVERVIEW                              │
+│    This is a credit risk classification model    │
+│    using logistic regression trained on...       │
+│    [continues with full summary, sources below] │
+│                                                    │
+│    ▼ Sources (click to expand)                   │
+│      [1] README.md, [2] train.py, [3] eval.py   │
+└─────────────────────────────────────────────────────┘
+```
+
+**Key features visible:**
+- **Workflow selector:** 12 pre-built assistants (dropdown list)
+- **Parameterization:** Some workflows (like Interview Questions) take a role input
+- **Real-time generation:** Shows output as it's generated
+- **Cited sources:** All outputs are grounded in retrieved context
+
+---
+
+## The AI Engineering: How It Works
+
+### 1. Document Processing & Parsing
+
+**What happens when you upload:**
+
+```
+your_project.zip
+├── train.py              → Parse as Python code
+├── analysis.ipynb        → Parse as Jupyter (separate code/markdown)
+├── README.md             → Parse as Markdown
+├── data.csv              → Parse as table + stats
+└── paper.pdf             → Extract text from each page
+```
+
+**Smart extraction per type:**
+- **Python:** Uses `ast` module to split on function/class boundaries (AST-aware, not line-count heuristics)
+- **Notebooks:** Keeps cell structure and type (code vs. markdown) with cell indices
+- **Markdown:** Splits on headers first, then packs sections intelligently
+- **CSV:** For small files, includes full table; for large files, includes schema + stats + sample rows (more useful per token)
+- **PDF:** Text extracted per page
+
+**Automatic filtering:**
+- Skips binaries, archives, model weights (`.pt`, `.pth`, `.h5`, `.pkl`)
+- Skips directories like `.git`, `__pycache__`, `node_modules`, `venv`
+- Skips files >20MB (per-file cap to keep ingestion fast)
+- Reports everything skipped with reasons (sidebar)
+
+### 2. Chunking Strategy (Token-Aware, Not Character-Aware)
+
+**The problem:** Most RAG demos chunk by character count ("1000 chars, 200 char overlap") — arbitrary, doesn't match how LLMs actually see text.
+
+**This project:** Chunks by *tokens*, using the **embedding model's own tokenizer** (WordPiece from `all-MiniLM-L6-v2`, max 256 tokens). 
+
+**Why this matters:**
+- Chunks are sized at ~200 tokens (⅔ of model's limit, safe margin)
+- Overlap of ~30 tokens (15%)
+- Nothing silently truncated by the embedding model
+- Token budgets are predictable across retrieval and generation
+
+**Three chunking strategies:**
+
+1. **Markdown files:** Split on headers first, pack adjacent sections
+   ```
+   # Architecture
+   ...(section content)...
+   ## Components
+   ...(section content)...
+   ```
+   → Keeps sections intact, prevents truncation mid-concept
+
+2. **Python files:** Split on AST boundaries (function/class defs)
+   ```python
+   class DataLoader:
+       def __init__(self): ...      [chunk]
+       def load(self): ...          [chunk]
+   def train_model(): ...           [chunk]
+   ```
+   → Clean, syntactically valid chunks; methods labeled with class name
+
+3. **Notebooks:** Per-cell chunking
+   ```
+   [Cell 0, Markdown] # Exploratory Data Analysis
+   [Cell 1, Code] import pandas as pd; df = pd.read_csv(...)
+   ```
+   → Preserves notebook structure and cell types
+
+### 3. Embeddings & Vector Store
+
+**Embedding model:** `all-MiniLM-L6-v2` (22MB, 384 dimensions)
+- Runs entirely locally on CPU
+- Fast (~500 chunks/sec on modern CPU)
+- Well-benchmarked for semantic similarity
+- No network calls, no API costs
+
+**Vector store:** FAISS `IndexFlatIP` (in-memory)
+- Pure in-memory, nothing persisted to disk
+- Exact cosine similarity (no approximation)
+- Instant search (<100ms for thousands of chunks)
+- Cleared when app closes (matches "local desktop app" model)
+
+### 4. Retrieval Pipeline
+
+**For each query, three steps:**
+
+1. **Over-fetch:** Retrieve `4 × k` candidates by raw similarity
+   - Default k=6, so fetch top 24
+
+2. **Maximal Marginal Relevance (MMR):** Keep top k, but diversify
+   - Prevents returning 5 near-identical chunks from the same section
+   - Balances relevance with diversity: `score = 0.5 × similarity - 0.5 × redundancy`
+   - Returns 6 diverse, relevant chunks instead of 5 redundant ones
+
+3. **Context Assembly:** Pack under token budget
+   - Add chunks in order until reaching 6000-token budget
+   - Stop early if budget is full (don't overload the LLM)
+   - Assemble numbered context block: `[1] file.py\n...text...\n\n[2] other.py\n...text...`
+
+**Example:**
+```
+Query: "how is the model evaluated?"
+↓
+Over-fetch: 24 candidates by similarity
+↓
+MMR: Select 6 with best balance of relevance & diversity
+↓
+Pack: Add to context until 6000 tokens
+↓
+Result: [1] eval.py (chunk 2/4)
+        [2] metrics.py (chunk 1/3)
+        ... (up to 6000 tokens)
+```
+
+### 5. Prompting & Generation
+
+**LLM:** Ollama + Mistral 7B (local, free)
+- Configurable via `OLLAMA_MODEL` (also supports Llama, Orca-mini, Phi, etc.)
+- Context window explicitly set to 12,288 tokens (vs. Ollama's small default)
+- Temperature=0.0 (deterministic, factual answers)
+
+**System prompt (same for all queries):**
+```
+You are an AI assistant exploring machine learning projects.
+Answer ONLY from the numbered context sources below.
+Cite source numbers for every factual claim.
+If sources don't cover the question, say so explicitly.
+Do not use outside knowledge.
+```
+
+**Why this design:**
+- Keeps retrieval and generation separate and testable
+- Makes hallucination-resistance explicit
+- Every answer is grounded in actual project content
+
+---
 
 ## Architecture
 
@@ -63,291 +456,396 @@ and correctly as possible, with just enough surrounding application to make that
                                                     └──────────┘
 ```
 
-Everything runs in one Python process. There is no REST API, no client/server split, and no persistence
-layer — the whole pipeline is a sequence of plain function calls over data held in
-`st.session_state`.
+**Everything runs in one Python process. No client/server split, no REST API, no persistence layer.**
 
-### Folder structure
+### Folder Structure
 
 ```
 app/
-    main.py            # Streamlit entry point (`streamlit run app/main.py`)
-    ui.py               # Sidebar (upload/session) + Chat/Search/Assistants tabs
-    document_loader.py  # File-type detection, per-type text extraction, zip/folder walking
-    chunking.py         # Token-aware chunking (text, markdown, AST-based python, notebook cells)
-    embeddings.py       # Local Sentence Transformers embeddings, L2-normalized
-    vector_store.py     # FAISS IndexFlatIP wrapper (in-memory cosine similarity)
-    retrieval.py        # Over-fetch + MMR diversification + token-budget context assembly
-    llm.py               # Thin wrapper around a local Ollama chat model
-    prompts.py            # RAG system prompt + one prompt per assistant workflow
-    rag.py                 # Grounded chat: retrieve -> build context -> one LLM call
-    workflows.py            # Data-driven assistant workflows (12 of them, one runner)
-    session.py              # st.session_state-backed session (chunks, index, chat history)
-    utils.py                 # Token counting, file-size formatting, ignore-pattern constants
-data/                        # Empty except for .gitkeep -- transient zip-extraction scratch space only
+    main.py            # Streamlit entry point
+    ui.py              # Sidebar, Chat/Search/Assistants tabs
+    document_loader.py # File parsing (PDF, CSV, Jupyter, etc.)
+    chunking.py        # Token-aware chunking with AST/markdown/notebook strategies
+    embeddings.py      # Local Sentence Transformers wrapper
+    vector_store.py    # FAISS in-memory index
+    retrieval.py       # Over-fetch, MMR, context assembly
+    llm.py             # Ollama chat client with error handling
+    prompts.py         # System prompts for all workflows
+    rag.py             # Chat QA pipeline (retrieve → assemble → chat)
+    workflows.py       # 12 assistant workflows (data-driven)
+    session.py         # Streamlit session state (temporary)
+    utils.py           # Token counting, file filtering
+
 tests/
-    test_chunking.py         # AST python chunking, markdown packing, notebook cells, token budgets
-    test_vector_store.py     # FAISS add/search correctness (synthetic vectors, no network)
-    test_retrieval.py        # MMR diversification behavior (synthetic vectors, no network)
-.env.example
-requirements.txt
-pytest.ini
+    test_chunking.py   # AST, markdown, notebook, token budget tests
+    test_retrieval.py  # MMR and context assembly tests
+    test_vector_store.py # FAISS add/search tests
+
+requirements.txt      # Python dependencies
+.env.example          # Ollama config (optional overrides)
 ```
 
-Each module does one thing. There's no service layer, no repository pattern, no dependency-injection
-framework — a Streamlit callback calls `document_loader`, then `chunking`, then `vector_store`, then
-`retrieval`, then `rag`/`workflows`, in a straight line.
+**Design principle:** Each module does one thing. No service layer, no repository pattern, no DI framework. A Streamlit callback calls `document_loader` → `chunking` → `vector_store` → `retrieval` → `rag` in a straight line.
 
-## The RAG pipeline
+---
 
-### 1. Document processing
+## Installation & Setup
 
-`document_loader.py` accepts individual files **or a `.zip` of a whole repository**. A zip is extracted
-into a temporary directory, walked recursively, and deleted as soon as ingestion finishes — nothing from
-an upload survives past that function call. The walker skips directories that are never useful for RAG
-(`.git`, `__pycache__`, `node_modules`, `venv`/`.venv`, `.ipynb_checkpoints`, `dist`/`build`, etc.) and
-binary/non-informative extensions (images, model weights, archives), and enforces a 20MB per-file cap so
-one huge asset can't blow up ingestion time or embedding cost. Skipped files are reported in the sidebar,
-not silently dropped.
+### Prerequisites
+- **Python:** 3.10+
+- **Ollama:** Download from [ollama.ai](https://ollama.ai)
+- **Disk space:** ~10GB (model + cache)
+- **RAM:** 8GB minimum (16GB recommended for large projects)
 
-**Supported document types:**
-
-| Type | Extraction |
-|---|---|
-| Markdown (`.md`) | Read as text, later chunked header-aware |
-| Python (`.py`) | Read as text, later chunked via `ast` |
-| Jupyter notebooks (`.ipynb`) | Parsed with `nbformat`; code and markdown cells kept separate, tagged with cell index/type |
-| PDF (`.pdf`) | Text extracted per page with `pypdf` |
-| CSV (`.csv`) | Small files: full table. Large files: shape, dtypes, `describe()`, and a head/tail sample instead of a full dump — a raw dump of a 50,000-row CSV is expensive to embed and not particularly useful to a semantic search anyway |
-| JSON (`.json`) | Pretty-printed |
-| Everything else (`.txt`, `.yaml`, `Dockerfile`, `LICENSE`, etc.) | Read as plain text |
-
-`.docx` is intentionally **not** supported — it wasn't in the target document set for this project, and
-dropping it keeps the dependency list smaller (see [Limitations](#limitations) for how to add it back).
-
-### 2. Chunking strategy — the part most RAG demos get wrong
-
-Chunk size and overlap are measured in **tokens**, against the *actual* embedding model's tokenizer
-(`all-MiniLM-L6-v2`'s WordPiece tokenizer, loaded via `transformers.AutoTokenizer` — already a dependency
-of `sentence-transformers`, so this adds nothing new), not raw character counts and not a stand-in
-tokenizer from a different model family. `all-MiniLM-L6-v2` truncates its input at **256 tokens**
-(`model.max_seq_length`); an earlier version of this project counted tokens with OpenAI's `tiktoken`
-(cl100k_base) — a leftover from when embeddings were generated via the OpenAI API — while chunking to
-~400 of those tokens per chunk. Because tiktoken and the MiniLM tokenizer segment text differently, a
-"400-token" chunk by that count was often 380-420 *real* WordPiece tokens once it reached the embedding
-model, well past the 256-token limit — the model silently truncated the excess, so the embedding
-represented only part of the chunk while the full (untruncated) text still went into the LLM's context.
-This version chunks at **~200 tokens per chunk with ~30 tokens (~15%) of overlap**, counted with the same
-tokenizer that will embed the text, so nothing is silently dropped.
-
-Three chunking strategies, chosen per file type:
-
-- **Markdown**: split on headers first, so a chunk never straddles two unrelated sections. Small adjacent
-  sections are then packed together up to the token budget (a header-heavy README with many short
-  sections would otherwise produce dozens of near-empty chunks — packing avoids that waste). Oversized
-  sections are split further by paragraph.
-- **Python**: split using the `ast` module on top-level function/class boundaries, instead of comparing
-  leading-whitespace counts line by line (the original approach, which breaks on decorators, multi-line
-  strings, and nested `def`s). If a class is too large to fit in one chunk, it's split **per method**, and
-  every resulting chunk is labeled with its enclosing class name (`# class Foo, function bar`) so a
-  chunk never loses the context of which class it came from. Falls back to plain text chunking on a
-  `SyntaxError` (e.g. a code fragment or non-Python-3 file).
-- **Notebooks**: chunked **per cell**, preserving the code/markdown boundary and cell index, with tiny
-  adjacent cells merged and oversized cells split — all through the same token-budget packer used
-  everywhere else.
-
-Every chunk carries `filename`, `file_type`, `chunk_index`, and `total_chunks_in_file` — this is what
-later powers citations that point at a specific chunk instance, not just a bare filename.
-
-### 3. Embeddings
-
-`embeddings.py` uses a local **Sentence Transformers** model (`all-MiniLM-L6-v2`, ~22MB, 384 dimensions)
-via the `sentence-transformers` library — everything runs on your machine, with no API key, no network
-call, and no per-token cost. The model is downloaded once from HuggingFace on first use and cached
-locally afterward. `all-MiniLM-L6-v2` is a standard, well-benchmarked choice for semantic similarity: fast
-on CPU, small on disk, and good enough for a single-session assistant's retrieval needs — this is not a
-system trying to optimize recall at billion-document scale. Every embedding is L2-normalized on the way
-out, which is what makes a plain inner product equivalent to cosine similarity downstream.
-
-### 4. Vector store
-
-`vector_store.py` wraps a FAISS `IndexFlatIP` (inner product) over normalized vectors, entirely **in
-memory** — nothing is written to disk, no SQLite file, no persist directory. This directly replaces the
-previous ChromaDB setup, which persisted a collection to a local SQLite file across sessions (in tension
-with the "everything disappears on close" model of a local desktop app) and — more importantly — had a
-scoring bug: Chroma's `similarity_search_with_score` returns a **distance** (lower = better) by default,
-but the retrieval code filtered with `score >= min_confidence_score`, silently treating a distance as if
-it were a similarity. Using FAISS `IndexFlatIP` over normalized vectors sidesteps the ambiguity entirely:
-there is exactly one score, and higher always means "more similar."
-
-### 5. Retrieval
-
-`retrieval.py` never calls the LLM — retrieval and generation are kept as separate, independently
-testable concerns. For a query:
-
-1. Over-fetch `4 * k` candidates by raw cosine similarity.
-2. Apply **Maximal Marginal Relevance (MMR)** (`lambda = 0.5`, implemented directly in `numpy` — no extra
-   dependency) to select `k` chunks that are relevant *and* mutually diverse. Without this step, a query
-   that matches one section well tends to retrieve several near-duplicate chunks from that same section,
-   crowding out other relevant context. `tests/test_retrieval.py` verifies this concretely: given a
-   highly relevant chunk, a near-duplicate of it, and a moderately relevant-but-diverse chunk, plain
-   top-k similarity picks the near-duplicate, MMR picks the diverse one instead.
-3. Assemble a numbered context block **under a fixed token budget** (6000 tokens), stopping once the
-   budget is spent rather than concatenating however many chunks were requested. The original project's
-   "assistant" workflows retrieved up to 15 chunks and concatenated all of them unconditionally — this
-   bounds both cost and the risk of diluting the model's attention with more text than it needs.
-
-There is deliberately **no fixed minimum-similarity cutoff**. The earlier version filtered out anything
-below `min_confidence_score = 0.7` — on top of being compared in the wrong direction (see above), a fixed
-threshold on an unnormalized, ambiguous score is not a principled way to decide "there's no relevant
-answer here." Instead, retrieval always returns its best-ranked, diversified candidates, and the prompt
-(see below) is explicitly responsible for saying "the context doesn't contain this" when what was
-retrieved isn't actually relevant. That's a property of generation, not retrieval, and it's a more honest
-way to handle it than an arbitrary number.
-
-### 6. Prompting and generation
-
-`llm.py` is a single, direct wrapper around a local **Ollama** server's chat API (`POST
-/api/chat`) — there is no LangChain, no hosted API, and no cost. Ollama runs an open-source model (this
-project defaults to **Mistral 7B**, configurable via `OLLAMA_MODEL`) entirely on your machine. A framework
-buys very little here and hides exactly what's being sent to the model, which matters when the whole
-point is to demonstrate the mechanics clearly.
-
-Every request explicitly sets **`num_ctx=12288`** (configurable via `OLLAMA_NUM_CTX`). Ollama defaults new
-sessions to a much smaller context window (historically 2048 tokens) regardless of what the underlying
-model actually supports, and this pipeline can assemble up to 6000 tokens of retrieved context plus 2000
-tokens of chat history — without raising `num_ctx`, Ollama would silently truncate the prompt itself
-before the model ever saw most of what was retrieved, independent of anything `retrieval.py` does
-correctly. 12288 leaves headroom for prompt overhead and a long generated answer (the assistant workflows
-in particular can produce lengthy structured documents) and comfortably fits every model in the
-recommended list above. `chat()` also treats *any* request failure — Ollama not running, the configured
-model not pulled (a 404), a timeout — as a recoverable condition and returns a plain-language message
-instead of raising, so a misconfigured local model degrades to a clear in-chat error rather than crashing
-the whole Streamlit app.
-
-Every prompt in `prompts.py` shares the same grounding rules: answer only from the numbered context
-sources, cite the source number for every claim (`[2]`), and explicitly say so when the context doesn't
-cover the question rather than falling back on the model's own knowledge. Generation runs at
-**`temperature=0.0`** — grounded, factual QA over retrieved context should be deterministic, not
-creative; the original project used `0.7` for this, which only adds hallucination risk with no
-corresponding benefit. Chat history passed to the model is itself token-budget-trimmed
-(`rag.py::_trim_history`), so a long conversation doesn't silently grow the prompt without bound.
-
-Each turn/workflow run makes **exactly one retrieval call and one LLM call** — no speculative or chained
-extra requests.
-
-## AI workflows
-
-Built on the same retrieval pipeline as Chat, available from the Assistants tab:
-
-- **Project Summary** — architecture, components, technologies, data pipeline, model, evaluation
-- **Generate README**, **Architecture Documentation**, **Model Card** — documentation generation
-- **Model Validation Report**, **Risk Analysis** — assumptions, data leakage, overfitting, bias/fairness/compliance risks
-- **Explain SHAP Analysis**, **Explain Feature Importance**, **Explain Evaluation Metrics** — explainability
-- **Code Quality Review**, **Engineering Practices Review** — repository review
-- **Interview Questions** (role-parameterized) — mock technical interview questions based on the uploaded project
-
-All twelve are defined as data (a `Workflow(label, query, prompt_template, k)` entry in `workflows.py`)
-rather than as separate classes — the earlier version had six ~100-line classes that were all "retrieve →
-build context → one LLM call" with a different prompt, which is now one dataclass table and one
-`run_workflow()` function.
-
-## Installation and setup
-
-**Prerequisites:** Python 3.10+, [Ollama](https://ollama.ai) installed locally. No API key, no account,
-no cost.
+### Step-by-Step
 
 ```bash
-git clone <repository-url>
+# 1. Clone the repository
+git clone https://github.com/AgrmRana/ML-Engineering-Copilot.git
 cd RAG-LLM
+
+# 2. Create and activate virtual environment
 python -m venv .venv
-source .venv/bin/activate      # Windows: .venv\Scripts\activate
+source .venv/bin/activate      # macOS/Linux
+# or
+.venv\Scripts\activate          # Windows
+
+# 3. Install Python dependencies
 pip install -r requirements.txt
-cp .env.example .env           # optional -- only needed to override defaults
 
-# Pull a local chat model (one-time, ~4GB download)
+# 4. Pull a local LLM (one-time download)
 ollama pull mistral
+# Or: ollama pull orca-mini  (smaller, ~2GB)
+# Or: ollama pull phi        (smallest, ~1.6GB)
 ```
 
-`sentence-transformers` downloads its embedding model (~22MB) automatically on first use; no separate
-step is needed for that one.
+**That's it.** The embedding model (`all-MiniLM-L6-v2`, ~22MB) downloads automatically on first use.
 
-## Running it
+### Run
 
+**Terminal 1: Start Ollama**
 ```bash
-ollama serve                   # in one terminal, if not already running
-streamlit run app/main.py      # in another terminal
+ollama serve
+# Ollama will be available at http://localhost:11434
 ```
 
-This opens the app at `http://localhost:8501`. The sidebar shows whether Ollama is reachable and the
-configured model is pulled.
+**Terminal 2: Start the app**
+```bash
+streamlit run app/main.py
+# Opens at http://localhost:8501
+```
 
-### Uploading a project
+### Configuration (Optional)
 
-In the sidebar, either:
-- select individual files (`.py`, `.ipynb`, `.md`, `.csv`, `.pdf`, `.json`, `.txt`, ...), or
-- select a **`.zip`** of an entire repository,
+Create a `.env` file in the project root to override defaults:
 
-then click **Process files**. The sidebar reports how many files were indexed into how many chunks and
-tokens, plus a list of anything that was skipped and why (unsupported binary, too large, empty, failed to
-parse). Click **Clear session** at any point to wipe everything and start over — this is the equivalent
-of closing and reopening the app.
+```env
+OLLAMA_URL=http://localhost:11434
+OLLAMA_MODEL=mistral              # or orca-mini, phi, llama2, neural-chat
+OLLAMA_NUM_CTX=12288              # Context window size
+```
 
-### Example queries (Chat tab)
+---
 
-- "What does this project do, at a high level?"
-- "Which file defines the training loop, and what algorithm does it use?"
-- "What evaluation metrics are reported, and where?"
-- "Are there any obvious data leakage risks in the preprocessing code?"
-- "Summarize what `retrieval.py` does and cite the relevant chunk."
+## Usage Walkthrough
 
-### Search tab
+### 1. Upload a Project
 
-Raw semantic search over the indexed chunks, ranked by cosine similarity, with **no LLM call** — useful
-for seeing exactly what the retriever considers relevant to a query, independent of how the model chooses
-to answer.
+**Sidebar:**
+- Click **"Browse files"** or drag-and-drop
+- Select individual files or a `.zip` of a repository
+- Click **"Process files"**
+
+**What happens:**
+```
+Sidebar shows:
+✓ Ollama ready (mistral)
+  
+Processing...
+  
+✓ Indexed 3 file(s) into 18 chunks
+
+Indexed files:
+  train.py — 8 chunks, 1,247 tokens
+  eval.py — 6 chunks, 945 tokens
+  README.md — 4 chunks, 623 tokens
+
+Skipped files:
+  models/ (not a supported type)
+  .gitignore (empty)
+```
+
+### 2. Chat Tab — Ask Questions
+
+**Type:** "What evaluation metrics does the model use?"
+
+**System:**
+1. Retrieves ~6 relevant chunks (training/evaluation code, metrics definitions)
+2. Assembles context
+3. Sends to Ollama with system prompt
+4. Returns answer with citations
+
+**Response might be:**
+```
+The model is evaluated using:
+- Accuracy [1] on the test split
+- F1 score [1] weighted by class frequency  
+- ROC-AUC [2] to assess ranking performance across thresholds
+
+[Sources]
+[1] eval.py (chunk 2/3): score = metrics.accuracy(y_true, y_pred)
+[2] metrics.py (chunk 1/2): roc_auc_score(y_true, y_pred_proba)
+```
+
+### 3. Search Tab — Explore Semantically
+
+**Query:** "model training optimization"
+
+**Results:**
+```
+Semantic search (no LLM call):
+
+[1] train.py (chunk 3/8) — score 0.89
+    def train_model(model, train_loader, optimizer, device):
+
+[2] config.yaml (chunk 1/2) — score 0.84
+    optimizer: adam
+    learning_rate: 0.001
+
+[3] README.md (chunk 2/4) — score 0.76
+    Training uses Adam optimizer with initial LR of 1e-3
+```
+
+### 4. Assistants Tab — Generate Summaries/Docs
+
+**Choose:** "Interview Questions"
+- Set role: "Data Scientist"
+- Click "Run"
+
+**Output:**
+```
+1. Describe the data preprocessing pipeline and how you handle missing values.
+   Key points: [extracted from code]
+   Follow-up: What validation techniques did you use to ensure the preprocessed data was correct?
+   Difficulty: Medium
+
+2. The model achieves X% accuracy on test data. How would you approach improving it?
+   ...
+```
+
+---
+
+## Key Design Decisions & Rationale
+
+### Local-Only (No APIs)
+
+**Decision:** Use Ollama + local embeddings, never call cloud APIs.
+
+**Why:**
+- No cost, no API keys, no rate limits
+- Works offline (after model download)
+- Data never leaves your machine
+- Demonstrates a complete AI system independently
+- Interview-friendly: works everywhere, no account setup
+
+**Trade-off:** Smaller models are slower and lower quality than GPT-4/Claude. Acceptable for a demo.
+
+---
+
+### Token-Aware Chunking
+
+**Decision:** Size chunks against the embedding model's tokenizer, not character count.
+
+**Why:**
+- Chunks respect the model's actual input limit (256 tokens)
+- No silent truncation by the embedding model
+- Predictable token budgets throughout the pipeline
+- Fixes a common RAG mistake: "400-token chunks" by the wrong tokenizer
+
+**How it works:**
+- Count tokens with `all-MiniLM-L6-v2`'s WordPiece tokenizer (already a dependency)
+- Target ~200 tokens per chunk (⅔ of 256-token limit)
+- Overlap of ~30 tokens (15%)
+
+---
+
+### Maximal Marginal Relevance (MMR)
+
+**Decision:** Use MMR to diversify retrieval results, not just raw similarity.
+
+**Why:**
+- Prevents returning 5 near-identical chunks from the same section
+- Balances relevance with diversity
+- Simple, no extra dependencies (pure numpy)
+
+**Example:**
+```
+Query: "How is data split?"
+
+Without MMR (top-5 by similarity):
+  preprocessing.py, chunk 1 (score 0.92)
+  preprocessing.py, chunk 2 (score 0.91) ← near duplicate
+  preprocessing.py, chunk 3 (score 0.89) ← near duplicate
+  preprocessing.py, chunk 4 (score 0.88) ← near duplicate
+  config.yaml, chunk 1 (score 0.72)
+
+With MMR (top-5 diverse):
+  preprocessing.py, chunk 1 (score 0.92)
+  config.yaml, chunk 1 (score 0.72)
+  README.md, chunk 2 (score 0.68)
+  validation.py, chunk 1 (score 0.65)
+  metadata.json, chunk 1 (score 0.61)
+```
+
+Better coverage of different aspects of the same topic.
+
+---
+
+### Explicit Context Window
+
+**Decision:** Set Ollama's `num_ctx` explicitly (12,288 tokens).
+
+**Why:**
+- Ollama defaults to a tiny context window (~2048) regardless of model capability
+- Our RAG pipeline assembles up to 6000 tokens of context
+- Without explicit `num_ctx`, Ollama silently truncates the prompt
+- Easy to miss if you don't know Ollama's behavior
+
+**Result:** Longer conversations, full RAG context delivered to the model.
+
+---
+
+### Separation of Retrieval & Generation
+
+**Decision:** Retrieval happens independently; no minimum-similarity filter.
+
+**Why:**
+- Retrieval just returns its best matches
+- Generation is responsible for "I don't know" responses
+- Makes each step testable, debuggable, tunable independently
+- Honest: the prompt explicitly tells the LLM to reject its own knowledge if context doesn't support it
+
+---
 
 ## Limitations
 
-- **Local model quality/speed trade-off.** Mistral 7B (via Ollama) and `all-MiniLM-L6-v2` (via Sentence
-  Transformers) are free and run entirely offline, but are smaller and slower than hosted models like
-  GPT-4 — expect noticeably slower responses (especially without a GPU) and occasionally less polished
-  answers. Swap `OLLAMA_MODEL` for a larger local model (e.g. `llama3`) for better quality at the cost of
-  more RAM/disk and slower inference.
-- **Session-only, single-user.** There is no persistence, no accounts, and no way to resume a previous
-  session — this mirrors a local desktop app, not a deployable multi-user service.
-- **English-oriented chunking heuristics.** The markdown header regex and sentence/paragraph splitting
-  assume roughly English/Markdown conventions.
-- **No `.docx` support.** Dropped to keep dependencies minimal; would need `python-docx` and a paragraph
-  extractor similar to the PDF/CSV ones in `document_loader.py`.
-- **No cross-encoder reranking.** MMR improves diversity using the same embedding vectors already
-  computed; a dedicated reranker (e.g. a cross-encoder model) could improve precision further at the cost
-  of another dependency and extra latency.
-- **In-memory FAISS index.** Fine for a single project/session; it is not built to scale to millions of
-  chunks or to be shared across processes.
-- **No conversation persistence across app restarts.** This is intentional (see the memory model above),
-  not an oversight.
+- **Local model quality:** Mistral 7B is good but slower and lower quality than GPT-4
+- **Single-session only:** No persistent history; everything disappears on close
+- **English-oriented:** Chunking heuristics assume English/Markdown conventions
+- **No cross-encoder reranking:** Could improve precision but adds latency
+- **In-memory index:** Fine for one project; not built for million-document scale
+- **No `.docx` support:** Kept dependencies minimal; `.md`, `.py`, `.ipynb` cover most project docs
+
+---
 
 ## Troubleshooting
 
-- **"Ollama not reachable"** — make sure Ollama is installed and running: `ollama serve` in a terminal
-  (it may already be running as a background service after installation on macOS/Windows).
-- **"Model not found"** — run `ollama pull mistral` (or whichever model you set via `OLLAMA_MODEL`).
-- **`faiss` fails to install** — `faiss-cpu` ships prebuilt wheels for common platforms (Linux, macOS,
-  Windows on standard Python versions); if your platform lacks a wheel, installing via `conda install -c
-  pytorch faiss-cpu` is the usual fallback.
-- **First run is slow** — the embedding model downloads (~22MB) on first use, and Ollama loads the chat
-  model into memory on its first request; both are one-time costs per machine/session.
-- **Large repository takes a while to process** — local inference is slower than a hosted API,
-  especially without a GPU. The 20MB per-file cap and directory ignore-list (`venv/`, `node_modules/`,
-  etc.) exist specifically to keep this bounded.
-- **A file didn't get indexed** — check the "Skipped files" expander in the sidebar; it lists every
-  skipped file with a reason (unsupported type, too large, empty, or a parse failure).
+| Issue | Solution |
+|-------|----------|
+| "Ollama not reachable" | Run `ollama serve` in a terminal |
+| "Model not found" | Run `ollama pull mistral` (or your configured model) |
+| "First run is slow" | Model downloads (~4GB) + embedding model cache (~22MB) = one-time cost |
+| "Large repo takes a while" | Local inference is slower than cloud APIs; 20MB file cap + ignore-list minimize this |
+| "A file didn't get indexed" | Check sidebar's "Skipped files" expander for the reason |
+| "`faiss` fails to install" | Try `conda install -c pytorch faiss-cpu` |
 
-## Future improvements
+---
 
-- Optional `.docx` support for design docs.
-- A cross-encoder reranking pass on top of MMR for higher-precision retrieval on larger corpora.
-- Streaming LLM responses in the Chat tab for lower perceived latency.
-- Hybrid search (BM25 + embeddings) for queries that hinge on exact identifiers (function names, error
-  codes) that embeddings alone can under-rank.
+## Supported File Types
+
+| Type | How It's Processed |
+|------|-------------------|
+| `.py` | AST-parsed into function/class chunks with class labels |
+| `.ipynb` | Parsed per cell (code/markdown separated, cell index tagged) |
+| `.md` | Split on headers, adjacent sections packed |
+| `.txt`, `.yaml`, `Dockerfile`, etc. | Read as plain text, split by paragraphs |
+| `.pdf` | Text extracted per page with `pypdf` |
+| `.csv` | Small: full table; Large: shape + dtypes + stats + sample rows |
+| `.json` | Pretty-printed |
+
+---
+
+## Example Queries
+
+### Chat Tab
+
+- "What does this project do, at a high level?"
+- "Which file defines the training loop, and what optimizer does it use?"
+- "What are the evaluation metrics, and where are they calculated?"
+- "Are there any data leakage risks in the preprocessing code?"
+- "Explain the architecture: how do the main modules interact?"
+- "Summarize the README. What's the installation process?"
+
+### Assistants Tab
+
+- **Project Summary:** Get a comprehensive overview in 2 minutes
+- **Interview Questions:** Generate questions for a take-home evaluation
+- **Code Quality Review:** Identify code smells and anti-patterns
+- **Validation Report:** Check for leakage, overfitting, and missing validations
+- **README Generator:** Auto-draft installation/usage docs from code
+
+---
+
+## Testing
+
+Run the test suite to verify chunking, retrieval, and vector store correctness:
+
+```bash
+pytest -v
+```
+
+Tests include:
+- Token budget compliance for all chunking strategies
+- AST-based Python chunking correctness
+- Markdown header preservation
+- Notebook cell type preservation
+- MMR diversification behavior
+- FAISS index add/search correctness
+
+All 15 tests should pass.
+
+---
+
+## Design & Implementation Philosophy
+
+This project prioritizes **clarity over complexity**:
+
+- **No microservices:** Single Python process with plain function calls
+- **No frameworks where not needed:** Direct FAISS, direct Ollama API, direct Streamlit
+- **No premature abstraction:** Repository patterns, DI containers, etc. removed
+- **Explicit over implicit:** All chunking/retrieval logic visible, testable, tunable
+- **Grounded in real AI practices:** MMR, token-aware chunking, separation of concerns — not toy examples
+
+The goal: demonstrate AI engineering fundamentals (embeddings, retrieval, prompting, LLM orchestration) as clearly and correctly as possible, using ~1000 lines of well-organized Python.
+
+---
+
+## Future Enhancements
+
+- **Cross-encoder reranking:** Dedicated reranker model for higher-precision retrieval
+- **Streaming responses:** Show LLM output in real-time instead of waiting for full generation
+- **Hybrid search:** BM25 + embeddings for exact-match queries (function names, error codes)
+- **Optional `.docx` support:** For design documents and proposals
+- **Multi-session persistence:** Optional SQLite for chat history across sessions
+- **Export capabilities:** Save conversations, summaries, and generated docs
+
+---
+
+## Requirements
+
+- Python 3.10+
+- 8GB RAM (16GB recommended)
+- ~10GB disk (models + cache)
+- macOS, Linux, or Windows
+
+---
+
+## License
+
+Open source. See repo for details.
+
+---
+
+## Contact & Questions
+
+This project is optimized for learning and interviews. Questions about the architecture, design decisions, or how to extend it? Refer to the modular code structure — each file is self-contained and well-commented.
