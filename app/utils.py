@@ -1,20 +1,26 @@
 """Small shared helpers: token counting and file-filtering constants."""
-import tiktoken
+from transformers import AutoTokenizer
 
-_ENCODING = tiktoken.get_encoding("cl100k_base")
+# The embedding model's own tokenizer (all-MiniLM-L6-v2, max_seq_length=256).
+# Chunking sizes chunks against this directly so nothing is silently truncated
+# by the embedding model. It's also used to budget LLM prompt sizes -- an
+# approximation there (Ollama models use their own tokenizers), but subword
+# tokenizers produce similar token/word ratios, and `llm.py` sets a generous
+# `num_ctx` with headroom, so the approximation never needs to be exact.
+# Already a dependency of sentence-transformers, so this adds nothing new.
+_TOKENIZER = AutoTokenizer.from_pretrained("sentence-transformers/all-MiniLM-L6-v2")
 
 
 def count_tokens(text: str) -> int:
-    """Count tokens the way the embedding/chat models see them."""
-    return len(_ENCODING.encode(text))
+    return len(_TOKENIZER.encode(text, add_special_tokens=False))
 
 
 def encode_tokens(text: str) -> list[int]:
-    return _ENCODING.encode(text)
+    return _TOKENIZER.encode(text, add_special_tokens=False)
 
 
 def decode_tokens(tokens: list[int]) -> str:
-    return _ENCODING.decode(tokens)
+    return _TOKENIZER.decode(tokens)
 
 
 def format_size(num_bytes: int) -> str:
